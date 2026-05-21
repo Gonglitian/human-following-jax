@@ -259,14 +259,36 @@
 
 ---
 
-## 🚧 PENDING — obs+action audit (sub-agent ran out of session)
+## 📝 Manual obs+action audit (sub-agent ran out — done by hand 2026-05-21)
 
-Will manually verify:
-- Coordinate frame consistency (robot frame vs odom frame) per obs key
-- OGM value range: original `int8 ∈ {-1, 0, 100}`, JAX `int8 ∈ {0, 1}` — **possible CNN-input issue**
-- `local_ogm` history is correctly stacked oldest-to-newest in both
-- `following_preference` value range vs preference_index mapping
-- Reset deterministic seeding (train/val/test seed disjoint)
+Verified (from `crowd_sim_following.py:630-689` `generate_ob` + `update_ogm_history`):
+
+### O1. 🟠 HIGH — `spatial_edges` not sorted by distance
+- **Original** `crowd_sim_following.py:668`: `spatial_edges = sorted(spatial_edges, key=lambda x: ||x[:2]||)` — humans pre-sorted by distance. Closest goes in slot 0, then slot 1, etc.
+- **JAX** `crowd_follow_env.py:217-220`: no sort — humans stay in spawn order.
+- **Effect**: The Transformer learns "slot k = k-th closest human". JAX breaks that assumption → attention may behave differently. Especially matters if we ever try weight transfer.
+- **Fix**: Sort `spatial_edges` by row L2 norm of `[x, y]` at current step.
+
+### O2. 🔵 LOW — OGM value range MATCHES (both `{0, 1}` int8) ✅
+Original (`crowd_sim_following.py:716`): `nn_ogm = np.where(current_ogm == 100, 1, 0).astype(np.int8)` — converts -1/0/100 → 0/1.
+JAX `lidar.py:rasterize_ogm`: scatters `int8(1)` at hit cells over int8 zeros. **Same range.**
+
+### O3. 🔵 LOW — OGM history rolling order is consistent ✅
+Original line 718-720: `ogm_history[:-1] = ogm_history[1:]; ogm_history[-1] = new` (drop oldest, append new at end).
+JAX `crowd_follow_env.py:303-305`: `concatenate([ogm_history[1:], new[None]], axis=0)` — same semantics.
+
+### O4. 🔵 LOW — `following_preference` shape + mapping ✅
+Original line 678: `np.array([[robot.get_following_preference()]])` — shape `(1, 1)`, scalar value in `{-2, -1, 0, 1, 2}`.
+JAX: `pref = pref_index - 2.0; following_pref = pref[None, None]` — shape `(1, 1)`, scalar in same set.
+
+### O5. 🟠 HIGH (already C5) — action clip L2 vs per-axis
+For holonomic kinematics, original `clip_action` (in `crowd_nav/policy/srnn.py:28-33`) does L2-norm rescale. JAX does per-axis. Confirmed.
+
+### O6. 🟡 MEDIUM — obs shape minor inconsistency in original
+Original line 654 uses `human_num + human_num_range = 40` for spatial_edges shape, but obs_space declares `max_human_num=45` (line 110). With the default `human_num_range=0`, both happen to equal sizes if max_human_num is set to 40 — but the code has been quietly using 40 not 45 for shape. JAX uses fixed 45 (from config). Either is fine as long as the policy's `spatial_edges` shape matches what's fed. Current JAX is consistent.
+
+### O7. 🔵 LOW — train/val/test seeding
+Original tracks `case_counter` per phase. JAX requires caller to manage key independence. Document in train script.
 
 ---
 
