@@ -43,16 +43,20 @@ class EnvConfig(NamedTuple):
     human_num: int = 10           # ACTIVE humans this episode (rest invalid)
     predict_steps: int = 5
     time_step: float = 0.25
-    max_steps: int = 200
+    max_steps: int = 200          # 200 * 0.25s = 50s episode (matches paper time_limit)
     robot_radius: float = 0.3
+    human_radius: float = 0.2     # NEW: matches paper config.humans.radius
     robot_v_pref: float = 1.2
-    follow_distance_min: float = 0.4   # collision with target
-    follow_distance_max: float = 5.0   # target lost
-    collision_penalty: float = -20.0
-    success_reward: float = 10.0
-    discomfort_dist: float = 0.5
-    discomfort_penalty_factor: float = 5.0
-    target_speed: float = 0.8
+    follow_distance_min: float = 0.4              # collision with target
+    follow_distance_max: float = 4.5              # target lost (paper: 4.5)
+    collision_penalty: float = -20.0              # paper: -20
+    success_reward: float = 25.0                  # paper: +25 on timeout-without-collision
+    # Discomfort penalty fires per step when within zone:
+    #   penalty = (d - zone) * factor * dt  (negative since d < zone)
+    discomfort_dist_human: float = 0.25           # paper: 0.25
+    discomfort_dist_obstacle: float = 0.50        # paper: 0.50
+    discomfort_penalty_factor: float = 10.0       # paper: 10
+    target_speed: float = 1.0                     # paper humans.v_pref = 1.0
     # Following preference: which discrete distance to follow at
     # -2: 1.37 | -1: 1.90 | 0: 2.29 | 1: 3.31 | 2: 3.80
     preference_dists: tuple = (1.37, 1.90, 2.29, 3.31, 3.80)
@@ -309,42 +313,86 @@ def env_step(key: jax.Array, state: EnvState, action: jax.Array, cfg: EnvConfig,
         key=k2,
     )
 
-    # 5) Reward + done
+    # 5) Reward + done — MATCHES paper crowd_sim_following.calc_reward()
     target_dist = jnp.linalg.norm(new_target_xy - new_robot_xy)
     desired_dist = PREFERENCE_DISTANCES[state.pref_index]
     distance_error = jnp.abs(target_dist - desired_dist)
 
-    # Collision: robot vs nearest human (excluding target since target is who we follow)
-    diffs = state.human_xy - new_robot_xy  # use old state.human_xy is fine
-    h_dists = jnp.where(state.human_valid,
-                        jnp.linalg.norm(diffs, axis=-1),
-                        jnp.inf)
-    min_h = jnp.min(h_dists, initial=jnp.inf)
-    human_collision = min_h < (cfg.robot_radius * 2)
+    # --- Collision detection (uses POST-step positions for both robot & humans) ---
+    # Human collision: edge-to-edge distance ≤ 0 means touching
+    # diffs uses NEW human positions (was bug: previously used stale state.human_xy)
+    diffs_h = new_h_xy - new_robot_xy
+    h_norm = jnp.linalg.norm(diffs_h, axis=-1)
+    h_edge = jnp.where(state.human_valid,
+                       h_norm - cfg.robot_radius - cfg.human_radius,
+                       jnp.inf)
+    min_h_edge = jnp.min(h_edge, initial=jnp.inf)
+    min_h_center = jnp.min(jnp.where(state.human_valid, h_norm, jnp.inf), initial=jnp.inf)
+    human_collision = min_h_edge < 0.0
+
+    # Target lost (> follow_distance_max=4.5 m)
     target_lost = target_dist > cfg.follow_distance_max
 
-    # Obstacle collision: distance to nearest box edge
+    # Obstacle collision: distance from robot center to nearest box edge
     nx = jnp.clip(new_robot_xy[0], state.boxes[:, 0], state.boxes[:, 2])
     ny = jnp.clip(new_robot_xy[1], state.boxes[:, 1], state.boxes[:, 3])
     box_dists = jnp.linalg.norm(new_robot_xy[None] - jnp.stack([nx, ny], axis=-1), axis=-1)
     min_box = jnp.min(box_dists, initial=jnp.inf)
-    box_collision = min_box < cfg.robot_radius
+    obstacle_dmin = min_box - cfg.robot_radius   # edge-to-edge clearance
+    box_collision = obstacle_dmin < 0.0
 
-    # Reward shaping
     collision = human_collision | box_collision | target_lost
-    reward_collision = jnp.where(collision, cfg.collision_penalty, 0.0)
-    reward_distance = -distance_error * 0.5  # MDE-aligned
-    reward_progress = -jnp.linalg.norm(new_robot_vel) * 0.01  # mild penalty for motion
-    reward = reward_collision + reward_distance + reward_progress
+    timeout = new_state.step_count >= cfg.max_steps
+    success = timeout & ~collision
 
-    done = collision | (new_state.step_count >= cfg.max_steps)
+    # --- Reward terms (paper crowd_sim_following.py:992-1062) ---
+    # (a) terminal penalty / reward
+    reward_terminal = jnp.where(collision, cfg.collision_penalty,
+                                jnp.where(success, cfg.success_reward, 0.0))
+
+    # (b) human-discomfort penalty: continuous soft zone
+    reward_discomfort_h = jnp.where(
+        min_h_edge < cfg.discomfort_dist_human,
+        (min_h_edge - cfg.discomfort_dist_human) * cfg.discomfort_penalty_factor * cfg.time_step,
+        0.0,
+    )
+
+    # (c) obstacle-discomfort penalty
+    reward_discomfort_o = jnp.where(
+        obstacle_dmin < cfg.discomfort_dist_obstacle,
+        (obstacle_dmin - cfg.discomfort_dist_obstacle) * cfg.discomfort_penalty_factor * cfg.time_step,
+        0.0,
+    )
+
+    # (d) predictive future-trajectory collision (paper §V eq w/ exp decay)
+    #   Predict humans at constant velocity for predict_steps frames ahead.
+    #   If any predicted human enters robot's collision zone, penalty = -20 / 2^(k+2)
+    ks = (jnp.arange(cfg.predict_steps) + 1).astype(jnp.float32) * cfg.time_step  # (K,)
+    pred_h = new_h_xy[:, None, :] + new_h_vel[:, None, :] * ks[None, :, None]     # (M, K, 2)
+    rel_future = pred_h - new_robot_xy[None, None, :]
+    pred_dists = jnp.linalg.norm(rel_future, axis=-1)                              # (M, K)
+    pred_collision = pred_dists < (cfg.robot_radius + cfg.human_radius)
+    coeffs = 2.0 ** (jnp.arange(cfg.predict_steps).astype(jnp.float32) + 2.0)      # 4, 8, 16, 32, 64
+    pen_per_step = cfg.collision_penalty / coeffs                                  # negative
+    masked = jnp.where(pred_collision & state.human_valid[:, None],
+                       pen_per_step[None, :], 0.0)
+    reward_future = jnp.min(masked, initial=0.0)
+
+    reward = reward_terminal + reward_discomfort_h + reward_discomfort_o + reward_future
+    done = collision | timeout
 
     info = {
         'target_dist': target_dist,
         'desired_dist': desired_dist,
         'distance_error': distance_error,
-        'min_human_dist': min_h,
+        'min_human_dist': min_h_center,
         'min_obs_dist': min_box,
+        # Per-type termination flags (matches paper's Info classes)
+        'success': success,
+        'human_collision': human_collision,
+        'box_collision': box_collision,
+        'target_lost': target_lost,
+        'timeout': timeout,
         'collision': collision,
     }
     obs = build_obs(new_state, cfg, lidar_cfg, ogm_cfg)
