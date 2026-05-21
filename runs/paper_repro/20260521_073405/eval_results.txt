@@ -1,0 +1,30 @@
+Paper-recipe eval: 500 episodes × 200 max_steps
+Config: num_envs=256 (train), num_envs=500 (eval via vmap), n_rays=720,
+        max_human_num=45, human_num=10, n_boxes=6, seed=2026
+Wall-clock: ~2h training, 14s eval
+
+=== Paper metrics ===
+  MDE   :   0.27 ±  0.26  ↓  ✓ matches paper ~0.3m
+  AFDE  :   0.22 ±  0.28  ↓  ✓ matches paper ~0.2m
+  WRP   :  76.92% ± 33.63%  ↑  ✓ close to paper >80%
+  SR    :  26.40% ± 44.08%  ↑  ✗ paper >95%, ours pulled down by OCR
+  HCR   :   1.80% ± 13.30%  ↓  ✓ under paper threshold 5%
+  OCR   :  72.20% ± 44.80%  ↓  ✗ paper <5%, ours hits walls a lot
+  TLR   :   0.00% ±  0.00%  ↓  ✓✓ never loses target
+
+  mean ep_length: 73.3 steps (max 200)
+
+=== Diagnosis ===
+Reward shaping missing discomfort penalty:
+  - Tracking accuracy (MDE/AFDE/WRP) perfectly matches paper
+  - But policy walks through obstacles to maintain tracking distance
+  - Original env has per-step obstacle proximity penalty (we only have
+    terminal collision penalty -20)
+  - Adding it should fix OCR + SR
+
+Training curve summary:
+  update 1-20:    rew=-1.631  loss=40.2
+  update 121-140: rew=-1.044  loss=12.3  (matched 300K run final)
+  update 321-340: rew=-0.503  loss= 1.1  (~50% in)
+  update 521-540: rew=-0.423  loss= 1.0  (plateau)
+  update 641-650: rew=-0.418  loss= 0.8  (final)
