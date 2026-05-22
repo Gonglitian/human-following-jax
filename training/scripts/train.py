@@ -81,8 +81,10 @@ def main():
     )
 
     # ---- Output dir ----
+    # IMPORTANT: resolve to absolute path so we survive CWD changes / dir
+    # moves during long runs (got bitten by this on v3 — see git history).
     ts = time.strftime('%Y%m%d_%H%M%S')
-    out_dir = Path(args.output) / ts
+    out_dir = Path(args.output).resolve() / ts
     out_dir.mkdir(parents=True, exist_ok=True)
     with open(out_dir / 'args.json', 'w') as f:
         json.dump(vars(args), f, indent=2)
@@ -152,6 +154,10 @@ def main():
     n_remaining = total_updates - 1
     params = final_params
     update_idx = 1
+    # Save mid-run checkpoints every ckpt_every updates so a crash near the end
+    # doesn't wipe hours of training (the v3 incident).
+    ckpt_every = max(100, chunk)
+    last_ckpt_at = 0
     while n_remaining > 0:
         this = min(chunk, n_remaining)
         # IMPORTANT: re-key each chunk so the rollout RNG advances
@@ -171,6 +177,21 @@ def main():
         log_rows.append((update_idx, mean_r, mean_l, sps))
         update_idx += this
         n_remaining -= this
+
+        # Mid-run checkpoint
+        if update_idx - last_ckpt_at >= ckpt_every:
+            ckpt_path = out_dir / 'params.ckpt'
+            tmp_path = out_dir / 'params.ckpt.tmp'
+            with open(tmp_path, 'wb') as f:
+                pickle.dump(params, f)
+            tmp_path.replace(ckpt_path)  # atomic rename
+            import csv as _csv
+            with open(out_dir / 'log.csv', 'w', newline='') as f:
+                _w = _csv.writer(f)
+                _w.writerow(['update', 'mean_reward', 'mean_loss', 'env_steps_per_sec'])
+                _w.writerows(log_rows)
+            print(f'[train] ckpt saved → {ckpt_path} ({update_idx} updates done)')
+            last_ckpt_at = update_idx
 
     total_dt = time.perf_counter() - overall_t0
     total_env_steps = (total_updates - 1) * steps_per_update
