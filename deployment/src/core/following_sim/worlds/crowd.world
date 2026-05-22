@@ -1,0 +1,76 @@
+<?xml version="1.0" ?>
+<sdf version="1.6">
+  <world name="crowd">
+    <physics type="ode">
+      <max_step_size>0.01</max_step_size>
+      <real_time_factor>1</real_time_factor>
+      <real_time_update_rate>100</real_time_update_rate>
+    </physics>
+    <gui><camera name="user_camera"><pose>0 -18 14 0 0.8 1.57</pose></camera></gui>
+
+    <include><uri>model://sun</uri></include>
+    <include><uri>model://ground_plane</uri></include>
+
+    <!-- 20 m x 20 m open hall surrounded by walls. HuNavSim injects ~10 SFM
+         actors at runtime. -->
+    <model name="hall_n">
+      <static>true</static><pose>0 10 0.5 0 0 0</pose>
+      <link name="link">
+        <collision name="c"><geometry><box><size>20 0.1 1.0</size></box></geometry></collision>
+        <visual name="v"><geometry><box><size>20 0.1 1.0</size></box></geometry></visual>
+      </link>
+    </model>
+    <model name="hall_s">
+      <static>true</static><pose>0 -10 0.5 0 0 0</pose>
+      <link name="link">
+        <collision name="c"><geometry><box><size>20 0.1 1.0</size></box></geometry></collision>
+        <visual name="v"><geometry><box><size>20 0.1 1.0</size></box></geometry></visual>
+      </link>
+    </model>
+    <model name="hall_e">
+      <static>true</static><pose>10 0 0.5 0 0 0</pose>
+      <link name="link">
+        <collision name="c"><geometry><box><size>0.1 20 1.0</size></box></geometry></collision>
+        <visual name="v"><geometry><box><size>0.1 20 1.0</size></box></geometry></visual>
+      </link>
+    </model>
+    <model name="hall_w">
+      <static>true</static><pose>-10 0 0.5 0 0 0</pose>
+      <link name="link">
+        <collision name="c"><geometry><box><size>0.1 20 1.0</size></box></geometry></collision>
+        <visual name="v"><geometry><box><size>0.1 20 1.0</size></box></geometry></visual>
+      </link>
+    </model>
+
+    <!-- Four pillar obstacles in the middle -->
+    <model name="pillar_1">
+      <static>true</static><pose> 3  3 0.5 0 0 0</pose>
+      <link name="link">
+        <collision name="c"><geometry><cylinder><radius>0.3</radius><length>1.0</length></cylinder></geometry></collision>
+        <visual name="v"><geometry><cylinder><radius>0.3</radius><length>1.0</length></cylinder></geometry></visual>
+      </link>
+    </model>
+    <model name="pillar_2">
+      <static>true</static><pose>-3  3 0.5 0 0 0</pose>
+      <link name="link">
+        <collision name="c"><geometry><cylinder><radius>0.3</radius><length>1.0</length></cylinder></geometry></collision>
+        <visual name="v"><geometry><cylinder><radius>0.3</radius><length>1.0</length></cylinder></geometry></visual>
+      </link>
+    </model>
+    <model name="pillar_3">
+      <static>true</static><pose> 3 -3 0.5 0 0 0</pose>
+      <link name="link">
+        <collision name="c"><geometry><cylinder><radius>0.3</radius><length>1.0</length></cylinder></geometry></collision>
+        <visual name="v"><geometry><cylinder><radius>0.3</radius><length>1.0</length></cylinder></geometry></visual>
+      </link>
+    </model>
+    <model name="pillar_4">
+      <static>true</static><pose>-3 -3 0.5 0 0 0</pose>
+      <link name="link">
+        <collision name="c"><geometry><cylinder><radius>0.3</radius><length>1.0</length></cylinder></geometry></collision>
+        <visual name="v"><geometry><cylinder><radius>0.3</radius><length>1.0</length></cylinder></geometry></visual>
+      </link>
+    </model>
+
+  </world>
+</sdf>

@@ -1,0 +1,7 @@
+sort_tracker_node:
+  ros__parameters:
+    sort:
+      max_age: 8
+      min_hits: 4
+      iou_threshold: 0.01
+

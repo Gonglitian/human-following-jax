@@ -1,0 +1,15 @@
+occupancy_grid_node:
+  ros__parameters:
+    grid_size: 10.0
+    resolution: 0.2
+
+    # Static map overlay (方案A)
+    # Set use_static_map: true and provide the SLAM-generated map yaml path
+    use_static_map: false
+    static_map_yaml: ""  # e.g. "/path/to/maps/lab_map.yaml"
+
+    # Human filtering: remove detected humans from obstacle grid
+    # Must be enabled — training OGM only contains static obstacles (humans filtered out).
+    # With this off, humans appear as "walls" in OGM, causing double-counting with spatial_edges.
+    human_filter_enabled: true
+    human_filter_radius: 0.4

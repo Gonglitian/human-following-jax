@@ -1,0 +1,84 @@
+<?xml version="1.0" ?>
+<sdf version="1.6">
+  <world name="junction">
+    <physics type="ode">
+      <max_step_size>0.01</max_step_size>
+      <real_time_factor>1</real_time_factor>
+      <real_time_update_rate>100</real_time_update_rate>
+    </physics>
+    <gui><camera name="user_camera"><pose>-10 -10 12 0 0.9 0.78</pose></camera></gui>
+
+    <include><uri>model://sun</uri></include>
+    <include><uri>model://ground_plane</uri></include>
+
+    <!-- T-junction: 14 m N-S corridor meets 14 m E-W corridor, 3 m wide -->
+    <!-- N corridor walls -->
+    <model name="ns_left">
+      <static>true</static><pose>-1.5 4.5 0.5 0 0 0</pose>
+      <link name="link">
+        <collision name="c"><geometry><box><size>0.1 9 1.0</size></box></geometry></collision>
+        <visual name="v"><geometry><box><size>0.1 9 1.0</size></box></geometry></visual>
+      </link>
+    </model>
+    <model name="ns_right">
+      <static>true</static><pose>1.5 4.5 0.5 0 0 0</pose>
+      <link name="link">
+        <collision name="c"><geometry><box><size>0.1 9 1.0</size></box></geometry></collision>
+        <visual name="v"><geometry><box><size>0.1 9 1.0</size></box></geometry></visual>
+      </link>
+    </model>
+    <!-- E corridor walls -->
+    <model name="ew_top">
+      <static>true</static><pose>4.5 -1.5 0.5 0 0 0</pose>
+      <link name="link">
+        <collision name="c"><geometry><box><size>9 0.1 1.0</size></box></geometry></collision>
+        <visual name="v"><geometry><box><size>9 0.1 1.0</size></box></geometry></visual>
+      </link>
+    </model>
+    <model name="ew_bot">
+      <static>true</static><pose>4.5 1.5 0.5 0 0 0</pose>
+      <link name="link">
+        <collision name="c"><geometry><box><size>9 0.1 1.0</size></box></geometry></collision>
+        <visual name="v"><geometry><box><size>9 0.1 1.0</size></box></geometry></visual>
+      </link>
+    </model>
+    <!-- W corridor walls -->
+    <model name="wc_top">
+      <static>true</static><pose>-4.5 -1.5 0.5 0 0 0</pose>
+      <link name="link">
+        <collision name="c"><geometry><box><size>9 0.1 1.0</size></box></geometry></collision>
+        <visual name="v"><geometry><box><size>9 0.1 1.0</size></box></geometry></visual>
+      </link>
+    </model>
+    <model name="wc_bot">
+      <static>true</static><pose>-4.5 1.5 0.5 0 0 0</pose>
+      <link name="link">
+        <collision name="c"><geometry><box><size>9 0.1 1.0</size></box></geometry></collision>
+        <visual name="v"><geometry><box><size>9 0.1 1.0</size></box></geometry></visual>
+      </link>
+    </model>
+    <!-- End caps -->
+    <model name="cap_north">
+      <static>true</static><pose>0 9 0.5 0 0 0</pose>
+      <link name="link">
+        <collision name="c"><geometry><box><size>3 0.1 1.0</size></box></geometry></collision>
+        <visual name="v"><geometry><box><size>3 0.1 1.0</size></box></geometry></visual>
+      </link>
+    </model>
+    <model name="cap_east">
+      <static>true</static><pose>9 0 0.5 0 0 0</pose>
+      <link name="link">
+        <collision name="c"><geometry><box><size>0.1 3 1.0</size></box></geometry></collision>
+        <visual name="v"><geometry><box><size>0.1 3 1.0</size></box></geometry></visual>
+      </link>
+    </model>
+    <model name="cap_west">
+      <static>true</static><pose>-9 0 0.5 0 0 0</pose>
+      <link name="link">
+        <collision name="c"><geometry><box><size>0.1 3 1.0</size></box></geometry></collision>
+        <visual name="v"><geometry><box><size>0.1 3 1.0</size></box></geometry></visual>
+      </link>
+    </model>
+
+  </world>
+</sdf>

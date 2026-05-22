@@ -1,0 +1,19 @@
+sort_tracker_node:
+  ros__parameters:
+    publisher:
+      tracks:
+        topic: "/tracked_objects"    # Topic to publish tracked PoseArray
+        queue_size: 10              # Queue size for the publisher
+        latch: false                # Latch setting for the publisher
+
+      tracks_viz:
+        topic: "/tracked_objects_viz"  # Topic to publish visualization MarkerArray
+        queue_size: 10                  # Queue size for the publisher
+        latch: false                    # Latch setting for the publisher
+
+    subscriber:
+      detections:
+        # topic: "/minkunet/poses"  # Topic to subscribe to for detections
+        topic: "/dr_spaam_detections"
+        queue_size: 10                  # Queue size for the subscriber
+

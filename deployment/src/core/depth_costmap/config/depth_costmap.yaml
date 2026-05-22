@@ -1,0 +1,14 @@
+depth_costmap:
+  ros__parameters:
+    camera_topic: "/camera/image_raw"
+    camera_info_topic: "/camera/camera_info"
+    occupancy_grid_topic: "/occupancy_grid"
+    occupancy_grid_json_topic: "/occupancy_grid_json"
+    depth_model: "depth-anything-v2-small"
+    grid_size: 10.0
+    resolution: 0.2
+    min_obstacle_height: 0.10
+    max_obstacle_height: 1.50
+    max_depth: 8.0
+    camera_frame: "camera_link"
+    target_frame: "odom"

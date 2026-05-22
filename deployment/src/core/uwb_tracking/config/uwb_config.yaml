@@ -1,0 +1,56 @@
+# UWB Tracking Configuration
+
+uwb_tracking_node:
+  ros__parameters:
+    # Serial port configuration
+    serial_port: "/dev/ttyUSB0"
+    serial_baudrate: 115200
+    serial_timeout: 0.01
+    
+    # Data processing configuration
+    read_frequency: 20.0  # Hz - frequency of data reading timer
+    max_lines_per_frame: 15
+    buffer_clear_threshold: 500  # bytes
+    periodic_clear_interval: 40  # timer cycles (2 seconds at 20Hz)
+    
+    # Positioning configuration
+    max_positioning_error: 3.0  # meters - maximum acceptable trilateration error
+    smoothing_alpha: 0.3  # smoothing factor for position filtering (0.0-1.0), lower = smoother
+    max_human_speed: 200.0  # meters/second - disable velocity filtering
+
+    # Kalman filter configuration
+    use_kalman_filter: true  # enable Kalman filter for better smoothing
+    kalman_process_noise: 0.1  # lower = smoother (trust prediction more)
+    kalman_measurement_noise: 3.0  # higher = smoother (trust prediction more)
+    
+    # Tag configuration
+    tag_count: 2
+    
+    # Anchor positions in robotics coordinate frame (meters)
+    # X = forward, Y = leftward, Z = upward (always 0 for 2D)
+    anchors:
+      anchor_0:
+        x: -0.48
+        y: -4.80
+        z: 0.0
+        name: "ANC 0"
+      anchor_1:
+        x: 0.0
+        y: 4.80
+        z: 0.0
+        name: "ANC 1"
+      anchor_2:
+        x: 14.67
+        y: 4.80
+        z: 0.0
+        name: "ANC 2"
+      anchor_3:
+        x: 14.67
+        y: -3.65
+        z: 0.0
+        name: "ANC 3"
+    
+    # Logging configuration
+    log_level: "info"  # debug, info, warn, error
+    log_raw_data: false  # whether to log raw serial data
+    log_parsed_data: false  # whether to log parsed UWB data 

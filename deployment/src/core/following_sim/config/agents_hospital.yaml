@@ -1,0 +1,62 @@
+hunav_loader:
+  ros__parameters:
+    simulator: Gazebo Classic
+    yaml_base_name: agents_hospital
+    map: hospital
+    publish_people: true
+
+    global_goals:
+      1: {x: -11.00, y: 0.00}
+      2: {x: 11.00, y: 0.00}
+
+    agents:
+      - target
+      - b1
+      - b2
+      - b3
+      - b4
+      - b5
+      - b6
+
+    target:
+      id: 1
+      group_id: -1
+      skin: 0
+      max_vel: 0.4
+      radius: 0.35
+      goal_radius: 0.3
+      cyclic_goals: true
+      init_pose: {x: -8.00, y: 0.00, z: 1.25, h: 0.0000}
+      behavior:
+        type: Regular
+        configuration: 0
+        goal_force_factor: 2.0
+        obstacle_force_factor: 10.0
+        social_force_factor: 5.0
+        other_force_factor: 20.0
+      goals: [2, 1]
+
+    b1: { id: 2, group_id: -1, skin: 2, max_vel: 0.4, radius: 0.35, goal_radius: 0.3, cyclic_goals: true,
+          init_pose: {x: -5.00, y: 5.00, z: 1.25, h: 1.5708},
+          behavior: {type: Regular, configuration: 0, goal_force_factor: 2.0, obstacle_force_factor: 10.0, social_force_factor: 5.0, other_force_factor: 20.0},
+          goals: [1, 2] }
+    b2: { id: 3, group_id: -1, skin: 3, max_vel: 0.4, radius: 0.35, goal_radius: 0.3, cyclic_goals: true,
+          init_pose: {x: 5.00, y: 5.00, z: 1.25, h: -1.5708},
+          behavior: {type: Regular, configuration: 0, goal_force_factor: 2.0, obstacle_force_factor: 10.0, social_force_factor: 5.0, other_force_factor: 20.0},
+          goals: [2, 1] }
+    b3: { id: 4, group_id: -1, skin: 4, max_vel: 0.4, radius: 0.35, goal_radius: 0.3, cyclic_goals: true,
+          init_pose: {x: -5.00, y: -5.00, z: 1.25, h: 1.5708},
+          behavior: {type: Regular, configuration: 0, goal_force_factor: 2.0, obstacle_force_factor: 10.0, social_force_factor: 5.0, other_force_factor: 20.0},
+          goals: [1, 2] }
+    b4: { id: 5, group_id: -1, skin: 5, max_vel: 0.4, radius: 0.35, goal_radius: 0.3, cyclic_goals: true,
+          init_pose: {x: 5.00, y: -5.00, z: 1.25, h: -1.5708},
+          behavior: {type: Regular, configuration: 0, goal_force_factor: 2.0, obstacle_force_factor: 10.0, social_force_factor: 5.0, other_force_factor: 20.0},
+          goals: [2, 1] }
+    b5: { id: 6, group_id: -1, skin: 1, max_vel: 0.4, radius: 0.35, goal_radius: 0.3, cyclic_goals: true,
+          init_pose: {x: 0.00, y: 8.00, z: 1.25, h: 0.0000},
+          behavior: {type: Regular, configuration: 0, goal_force_factor: 2.0, obstacle_force_factor: 10.0, social_force_factor: 5.0, other_force_factor: 20.0},
+          goals: [1, 2] }
+    b6: { id: 7, group_id: -1, skin: 2, max_vel: 0.4, radius: 0.35, goal_radius: 0.3, cyclic_goals: true,
+          init_pose: {x: 0.00, y: -8.00, z: 1.25, h: 0.0000},
+          behavior: {type: Regular, configuration: 0, goal_force_factor: 2.0, obstacle_force_factor: 10.0, social_force_factor: 5.0, other_force_factor: 20.0},
+          goals: [2, 1] }

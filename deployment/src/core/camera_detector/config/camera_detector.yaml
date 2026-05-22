@@ -1,0 +1,25 @@
+camera_detector:
+  ros__parameters:
+    # Input topics (Astra Pro: /camera/color/* and /camera/depth/*)
+    camera_topic: "/camera/color/image_raw"
+    camera_info_topic: "/camera/color/camera_info"
+    depth_image_topic: "/camera/depth/image_raw"
+
+    # Output topics
+    detection_topic: "/dr_spaam_detections"
+    detection_image_topic: "/camera/detections_image"
+    person_crops_topic: "/camera/person_crops"
+
+    # YOLO11-Pose
+    yolo_model: "yolo11n-pose.pt"
+    yolo_conf_threshold: 0.5
+
+    # Depth mode: "hardware" or "neural"
+    #   hardware — Astra Pro depth topic (0ms GPU, ±1-3mm)
+    #   neural   — Depth Anything V2 (~38ms GPU, no depth camera needed)
+    depth_mode: "hardware"
+    depth_scale: 0.001  # Astra mm → meters
+
+    # Frames
+    camera_frame: "camera_link"
+    target_frame: "odom"

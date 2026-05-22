@@ -1,0 +1,20 @@
+target_tracker:
+  ros__parameters:
+    # Input topics
+    camera_topic: "/camera/image_raw"
+    person_crops_topic: "/camera/person_crops"
+    tracked_objects_topic: "/tracked_objects_json"
+    command_topic: "/command"
+
+    # Output topics
+    target_position_topic: "/camera/target_position"
+    target_viz_topic: "/camera/target_viz"
+
+    # Re-ID parameters
+    reid_similarity_threshold: 0.55
+    reid_feature_update_rate: 0.1
+    reid_history_size: 10
+
+    # Target tracking
+    max_lost_frames: 30
+    spatial_fallback_radius: 1.5

@@ -1,0 +1,57 @@
+<?xml version="1.0" ?>
+<sdf version="1.6">
+  <world name="occlusion">
+    <physics type="ode">
+      <max_step_size>0.01</max_step_size>
+      <real_time_factor>1</real_time_factor>
+      <real_time_update_rate>100</real_time_update_rate>
+    </physics>
+    <gui><camera name="user_camera"><pose>-3 -12 8 0 0.9 1.57</pose></camera></gui>
+
+    <include><uri>model://sun</uri></include>
+    <include><uri>model://ground_plane</uri></include>
+
+    <!-- Long corridor with three off-centre obstructing boxes. The target
+         walks in a straight line; these boxes periodically block LOS so the
+         decider has to fall back on UWB and extrapolated trajectories. -->
+    <model name="w_n">
+      <static>true</static><pose>0 2 0.5 0 0 0</pose>
+      <link name="link">
+        <collision name="c"><geometry><box><size>20 0.1 1.0</size></box></geometry></collision>
+        <visual name="v"><geometry><box><size>20 0.1 1.0</size></box></geometry></visual>
+      </link>
+    </model>
+    <model name="w_s">
+      <static>true</static><pose>0 -2 0.5 0 0 0</pose>
+      <link name="link">
+        <collision name="c"><geometry><box><size>20 0.1 1.0</size></box></geometry></collision>
+        <visual name="v"><geometry><box><size>20 0.1 1.0</size></box></geometry></visual>
+      </link>
+    </model>
+
+    <!-- Three shoulder-height boxes offset from the centre line: 0.7 m wide,
+         positioned so a robot following ~2 m behind the target loses LOS. -->
+    <model name="occluder_1">
+      <static>true</static><pose>-4 0.6 0.5 0 0 0</pose>
+      <link name="link">
+        <collision name="c"><geometry><box><size>0.7 0.7 1.2</size></box></geometry></collision>
+        <visual name="v"><geometry><box><size>0.7 0.7 1.2</size></box></geometry></visual>
+      </link>
+    </model>
+    <model name="occluder_2">
+      <static>true</static><pose>0 -0.6 0.5 0 0 0</pose>
+      <link name="link">
+        <collision name="c"><geometry><box><size>0.7 0.7 1.2</size></box></geometry></collision>
+        <visual name="v"><geometry><box><size>0.7 0.7 1.2</size></box></geometry></visual>
+      </link>
+    </model>
+    <model name="occluder_3">
+      <static>true</static><pose>4 0.6 0.5 0 0 0</pose>
+      <link name="link">
+        <collision name="c"><geometry><box><size>0.7 0.7 1.2</size></box></geometry></collision>
+        <visual name="v"><geometry><box><size>0.7 0.7 1.2</size></box></geometry></visual>
+      </link>
+    </model>
+
+  </world>
+</sdf>

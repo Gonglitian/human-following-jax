@@ -1,8 +1,17 @@
 # human-following-jax
 
-A JAX rewrite of the RSS 2026 paper **Learning Customizable Human Following**'s
-training stack, designed so the whole env + PPO loop runs **on the GPU** and the
-CPU stops being the bottleneck.
+A monorepo for the RSS 2026 paper **Learning Customizable Human Following**.
+Two halves, one repo:
+
+- [`training/`](training/) — JAX rewrite of the original PyTorch training stack.
+  Entire env + PPO loop runs **on the GPU**; CPU stops being the bottleneck
+  (~100× end-to-end speedup vs the original).
+- [`deployment/`](deployment/) — ROS 2 stack that runs the trained policy on
+  the **Yahboom Rosmaster X3** mecanum robot (LiDAR + UWB + RL decider).
+
+The PyTorch source we ported from lives separately at
+[`human-following-robot`](https://github.com/tasl-lab/human-following-robot)
+(referenced, not vendored).
 
 > 中文版见 [README.zh.md](README.zh.md)
 
@@ -52,11 +61,11 @@ thousands of envs, with the whole rollout+update cycle fused into one
 
 ---
 
-## Install
+## Install (training side)
 
 ```bash
-git clone <repo-url> human-following-jax
-cd human-following-jax
+git clone https://github.com/Gonglitian/human-following-jax.git
+cd human-following-jax/training
 /usr/bin/python3 -m pip install --user -e .
 ```
 
@@ -70,6 +79,8 @@ For **Python 3.8** (most lab machines are still on Foxy / Ubuntu 20.04):
 ```
 
 For Python ≥ 3.10 use latest JAX (`jax[cuda12]`) — ~20 % faster XLA.
+See [`training/SETUP.md`](training/SETUP.md) for the full Jenkins-friendly
+recipe (CUDA version table, GPU memory tuning, troubleshooting).
 
 Verify GPU:
 ```bash
@@ -82,6 +93,7 @@ Verify GPU:
 ## Quick train
 
 ```bash
+cd training
 # 5M env steps, default ~6 GB GPU, RTX 3070 finishes in <2 hours wall-clock
 /usr/bin/python3 scripts/train.py \
   --num-envs 1024 --total-timesteps 5000000 \
@@ -90,6 +102,16 @@ Verify GPU:
 ```
 
 Output: `runs/<TS>/{params.pkl, log.csv, args.json}`.
+
+---
+
+## Deployment
+
+See [`deployment/README.md`](deployment/README.md) and
+[`DEPLOY.md`](DEPLOY.md) for the ROS 2 robot bringup pipeline (DR-SPAAM ◦ SORT
+◦ predictor ◦ decider ◦ /cmd_vel). Heavyweight 3rd-party deps (HuNavSim, AWS
+worlds) and PyTorch model checkpoints are pulled in by helper scripts, not
+tracked in git.
 
 ### Tuning num_envs
 
@@ -108,30 +130,43 @@ GPU-bound on policy compute. Profile with `scripts/bench_gpu_memory.py`.
 
 ```
 human-following-jax/
-├── src/
-│   ├── env/
-│   │   ├── geometry.py          # ray-box / ray-circle intersection (vmappable)
-│   │   ├── lidar.py             # LiDAR scan + OGM rasterization
-│   │   ├── human_dynamics.py    # Helbing social force (replaces RVO2)
-│   │   └── crowd_follow_env.py  # full env: reset/step/reward/obs
-│   ├── policy/
-│   │   └── it_meta.py           # ITMetaPolicy (Flax port of InteractionTransformerMeta)
-│   └── training/
-│       └── ppo.py               # PureJaxRL-style PPO with lax.scan
-├── tests/
-│   ├── test_lidar.py            # geometry + scan + OGM
-│   ├── test_human_dynamics.py   # social force
-│   ├── test_env.py              # full env shapes/jit/vmap
-│   ├── test_policy.py           # Flax policy shapes/forward
-│   └── test_training_smoke.py   # end-to-end 2 PPO updates
-├── scripts/
-│   ├── train.py                 # main train driver
-│   └── bench_gpu_memory.py      # GPU memory sweep
-├── docs/
-│   ├── PORT_SCOPE.md            # how original PyTorch maps to JAX
-│   ├── ARCHITECTURE.md          # design choices (env on GPU, vmap, scan)
-│   └── REPRODUCE.md             # full repro recipe to match paper metrics
-└── pyproject.toml
+├── README.md / README.zh.md
+├── DEPLOY.md                     # robot-side bringup recipe
+├── .gitignore
+│
+├── training/                     # ── JAX training stack ──
+│   ├── pyproject.toml
+│   ├── SETUP.md                  # GPU server / Jenkins setup
+│   ├── src/
+│   │   ├── env/                  # geometry, lidar, human_dynamics, crowd_follow_env
+│   │   ├── policy/it_meta.py     # Flax ITMetaPolicy
+│   │   └── training/ppo.py       # PureJaxRL PPO (lax.scan fused)
+│   ├── scripts/                  # train.py, eval.py, bench_gpu_memory.py
+│   ├── tests/                    # test_env, test_policy, test_training_smoke, …
+│   ├── docs/                     # PORT_SCOPE, ARCHITECTURE, AUDIT, REPRODUCE
+│   └── runs/                     # gitignored
+│
+└── deployment/                   # ── ROS 2 robot stack ──
+    ├── README.md
+    ├── src/
+    │   ├── core/                 # 13 vendored lab-developed ROS 2 packages
+    │   │   ├── decider/          # RL inference + control (loads policy)
+    │   │   ├── predictor/        # constant-velocity trajectory prediction
+    │   │   ├── target_tracker/   # single-target lock
+    │   │   ├── sort_tracker/     # SORT MOT
+    │   │   ├── camera_detector/  # RGB-D detector
+    │   │   ├── uwb_tracking/     # LinkTrack UWB Kalman
+    │   │   ├── command_listener/ # CLI mode/preference
+    │   │   ├── depth_costmap/    # depth → costmap
+    │   │   ├── occupancy_generation/  # LiDAR → OGM
+    │   │   ├── frequency_monitor/     # Hz + latency CSV logging
+    │   │   ├── tf_republisher/   # TF bridge
+    │   │   ├── fake_detection/   # sim-only test source
+    │   │   └── following_sim/    # lightweight Gazebo URDF
+    │   └── third_party/          # populated by install_third_party.sh
+    └── scripts/
+        ├── install_third_party.sh  # clones HuNavSim/AWS worlds/etc
+        └── pull_models.sh          # downloads PyTorch ckpts from Google Drive
 ```
 
 ---
@@ -162,6 +197,7 @@ Same as original:
 ## Tests
 
 ```bash
+cd training
 for t in tests/test_*.py; do /usr/bin/python3 $t; done
 ```
 

@@ -1,0 +1,47 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>following_sim</name>
+  <version>0.1.0</version>
+  <description>Gazebo simulation + HuNavSim wrapper for evaluating the human-following RL policy on a Yahboom ROSMASTER X3.</description>
+  <maintainer email="gonglitian2002@gmail.com">glt</maintainer>
+  <license>BSD-3-Clause</license>
+
+  <buildtool_depend>ament_python</buildtool_depend>
+
+  <!-- ROS 2 base -->
+  <exec_depend>rclpy</exec_depend>
+  <exec_depend>std_msgs</exec_depend>
+  <exec_depend>geometry_msgs</exec_depend>
+  <exec_depend>nav_msgs</exec_depend>
+  <exec_depend>sensor_msgs</exec_depend>
+  <exec_depend>visualization_msgs</exec_depend>
+  <exec_depend>tf2_ros</exec_depend>
+
+  <!-- Gazebo Classic -->
+  <exec_depend>gazebo_ros</exec_depend>
+  <exec_depend>gazebo_ros_pkgs</exec_depend>
+  <exec_depend>xacro</exec_depend>
+  <exec_depend>robot_state_publisher</exec_depend>
+
+  <!-- HuNavSim (cloned via scripts/install_sim_deps.sh into the same workspace) -->
+  <exec_depend>hunav_msgs</exec_depend>
+  <exec_depend>hunav_agent_manager</exec_depend>
+  <exec_depend>hunav_evaluator</exec_depend>
+  <exec_depend>hunav_gazebo_wrapper</exec_depend>
+
+  <!-- In-tree pipeline -->
+  <exec_depend>dr_spaam_ros2</exec_depend>
+  <exec_depend>sort_tracker</exec_depend>
+  <exec_depend>predictor</exec_depend>
+  <exec_depend>occupancy_generation</exec_depend>
+  <exec_depend>decider</exec_depend>
+  <exec_depend>command_listener</exec_depend>
+
+  <test_depend>ament_lint_auto</test_depend>
+  <test_depend>ament_lint_common</test_depend>
+
+  <export>
+    <build_type>ament_python</build_type>
+  </export>
+</package>
