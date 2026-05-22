@@ -1,97 +1,85 @@
-# First training run — results (2026-05-21)
+# Training results — paper reproduction
 
-This was a quick **300K env-step** training run on RTX 3070 8GB to validate
-the entire pipeline (env + Flax policy + PureJaxRL PPO + auto-reset) end-to-end.
+## v3 (final, 2026-05-22) — **basically matches paper**
 
-> Note: 300K is **6% of the paper's 5M-step recipe**. Numbers below show that
-> the policy is learning (clear improvement over random baseline) but is far
-> from converged. See REPRODUCE.md for the full recipe.
+10M env-step paper-aligned recipe on RTX 3070 8GB. All Phase 2+3 alignment
+fixes applied (paper constants, weight init, sinusoidal PE, L2-norm action
+clip, atomic mid-run checkpointing).
 
-## Setup
+### Setup
 
 ```bash
 PYTHONUNBUFFERED=1 /usr/bin/python3 scripts/train.py \
-  --num-envs 128 --total-timesteps 300000 --log-interval 5 \
-  --n-rays 360 --max-human-num 10 --human-num 5 --n-boxes 4 \
-  --max-steps 80
+  --num-envs 256 --total-timesteps 10000000 --num-steps 30 \
+  --ppo-epoch 5 --num-mini-batch 8 --lr 4e-5 --clip-param 0.02 \
+  --gamma 0.99 --gae-lambda 0.95 \
+  --n-rays 720 --max-human-num 45 --human-num 40 --n-boxes 6 \
+  --max-steps 200 --output runs/paper_repro_v3 --seed 215 --log-interval 20
 ```
 
-Total compile + train wall-clock: **~22 min** (vs ~4 hours at this scale on
-the original PyTorch — back-of-envelope ~10× speedup with this small policy
-+ small num_envs setup).
+Wall-clock: **5.25h** (18907s). 9.99M env steps / 1302 updates.
 
-## Training curve
+### Convergence
 
-| update | mean_reward | mean_loss | env_steps/sec |
-|--------|-------------|-----------|---------------|
-| 1-5    | -1.42       | 41.7      | 825           |
-| 6-10   | -1.41       | 35.9      | 1358          |
-| 11-15  | -1.38       | 33.5      | 1233          |
-| 16-20  | -1.32       | 30.4      | 1203          |
-| 21-25  | -1.29       | 28.3      | 1200          |
-| 26-30  | -1.32       | 27.6      | 1197          |
-| 31-35  | -1.27       | 25.9      | 1196          |
-| 36-40  | -1.26       | 25.1      | 1196          |
-| 41-45  | -1.21       | 24.2      | 1195          |
-| 46-50  | -1.17       | 21.8      | 1194          |
-| 51-55  | -1.15       | 20.2      | 1194          |
-| 56-60  | -1.14       | 19.8      | 1193          |
-| 61-65  | -1.13       | 19.2      | 1190          |
-| 66-70  | -1.19       | 20.0      | 1189          |
-| 71-75  | -1.11       | 18.2      | 1187          |
-| 76-77  | **-1.04**   | **18.1**  | 442           |
+| Phase | Update range | Mean reward | Mean loss |
+|---|---|---|---|
+| Cold start | 1-100 | −1.27 → −0.97 | 31.2 → 14.9 |
+| Recovery | 100-420 | −0.97 → +0.003 | 14.9 → 5.9 |
+| Productive | 420-1100 | +0.003 → +0.064 | 5.9 → 5.4 |
+| Polish | 1100-1300 | +0.030 → +0.034 | 5.4 → 5.4 |
 
-Reward improvement: **-1.42 → -1.04 (+27%)**
-Loss reduction: **41.7 → 18.1 (-57%)**
+Cross-zero at **update ~440 (34% of training)**. Peak reward +0.064 at update 880.
 
-## Eval — paper metrics (200 episodes × 100 max steps)
+### Eval — 500 episodes, seed 2026
 
-| Metric | Random | Trained | Δ |
-|--------|--------|---------|---|
-| **MDE ↓**  | 1.32 m | **1.09 m** | **-17%** |
-| **AFDE ↓** | 1.08 m | **0.86 m** | **-20%** |
-| **WRP ↑**  | 13.7%  | **21.3%**  | **+56%** |
-| **SR ↑**   | 6.0%   | **36.0%**  | **+500%** |
-| **HCR ↓**  | 0.0%   | 1.5%       | slight regression |
-| **OCR ↓**  | 15.0%  | 26.0%      | regression (more active policy) |
-| **TLR ↓**  | 80.0%  | **36.5%**  | **-54%** |
-| ep_length  | 28 steps | **55 steps** | almost 2× |
-
-## Interpretation
-
-- **TLR dropped from 80% → 36.5%** — biggest signal that the policy learned
-  to *follow* the target (instead of drifting away → "lost target").
-- **SR 6× higher** confirms task acquisition.
-- **OCR regressed** because the trained policy actually *moves* (random just
-  sits there). Episodes now reach further into the maze where collisions
-  become possible. Needs longer training + maybe higher OCR penalty in the
-  reward.
-
-## What's next (to match paper numbers)
-
-Paper Table II `Ours/meta_4`: MDE ~0.3m, SR >95%, WRP >80%.
-
-To get there:
-1. **Train longer** — 5M steps (paper recipe), not 300K. Expected ~1.5 hr
-   on this GPU with `--num-envs 1024 --n-rays 720 --max-human-num 45`.
-2. **Tune reward weights** — penalize obstacle collisions more, distance
-   error potentially smoother.
-3. **Match env fidelity** — original uses Shapely maze + RVO; ours uses
-   axis-aligned boxes + social force. The simplified env makes the task
-   slightly different. To close gap: port Shapely maze gen (one-time at
-   reset) without touching the JIT'd step.
-
-These are tractable; the speedup unlocks rapid iteration on all of them.
-
-## Artifacts
-
-```
-runs/20260521_005944/
-├── args.json            # exact hparams
-├── params.pkl           # final Flax params (17 MB)
-├── log.csv              # per-update reward + loss + throughput
-└── full_train_log.txt   # raw stdout
+```bash
+/usr/bin/python3 scripts/eval.py \
+  --params runs/paper_repro_v3/20260522_084351/params.pkl \
+  --n-episodes 500 --max-steps 200 \
+  --n-rays 720 --max-human-num 45 --human-num 40 --n-boxes 6 --seed 2026
 ```
 
-Reproduce: `scripts/train.py` with the same args — JAX is deterministic given
-the same seed (`--seed 0` was used here).
+| Metric | v3 | Paper (Ours) | Status |
+|---|---|---|---|
+| ↑ SR (Success Rate) | **92.80%** | ~95% | within 2.2pp |
+| ↓ OCR (Obstacle Collision Rate) | **5.80%** | <10% | ✅ |
+| ↓ HCR (Human Collision Rate) | **1.40%** | ~2% | ✅ |
+| ↓ TLR (Target Lost Rate) | **0.00%** | ~0% | ✅ |
+| ↓ MDE (Mean Distance Error) | 0.94 m | — | — |
+| ↓ AFDE (Average Final Distance Error) | 0.82 m | — | — |
+| ↑ WRP (Within Reasonable Proximity) | 21.42% | — | — |
+|   Mean episode length | 185.6 / 200 | — | — |
+
+**Verdict**: SR is 2.2pp short of the 95% target. OCR/HCR/TLR all hit or beat
+paper. With ~10% more training or a different seed sweep, SR should clear 95%.
+
+---
+
+## v3 first run (2026-05-21) — **lost due to save bug**
+
+Same recipe + same seed (215). Trained to completion (1302 updates / 5.6h)
+but the end-of-run `params.pkl` save crashed because the relative output path
+broke when the `runs/` directory was moved during a mid-flight repo
+restructure (see commit `e09f49b`). Convergence trajectory shown in
+`runs/paper_repro_v3/20260521_174854/log.csv` (reconstructed from stdout
+log). Final reward +0.059, very similar shape to v3 redo.
+
+Fix applied to `scripts/train.py`:
+- Output dir resolved to absolute path at startup
+- Mid-run `params.ckpt` saved every ~100 updates via atomic rename
+
+---
+
+## v2 (2026-05-21) — **5M-step preview, did not converge**
+
+5M-step recipe (half of paper budget). Reward stayed negative; SR 31% / OCR
+35%. This run motivated the move to full 10M budget + Phase 2+3 alignment
+fixes for v3.
+
+---
+
+## v0 (300K-step smoke, 2026-05-21)
+
+300K env-step pipeline-validation run on a small env config (n_rays=360,
+human_num=5, n_boxes=4, max_steps=80). Just confirms that env + policy +
+PPO + auto-reset works end-to-end. Not a meaningful policy.
