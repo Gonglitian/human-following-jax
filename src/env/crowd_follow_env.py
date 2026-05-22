@@ -30,17 +30,25 @@ import jax
 import jax.numpy as jnp
 
 from .lidar import LidarConfig, OgmConfig, simulate_scan, rasterize_ogm, make_angles
-from .human_dynamics import HumanConfig, step_all_humans
+from .human_dynamics import HumanConfig, step_all_humans, step_one_human
+
+
+def _step_one_with_social_force(pos, vel, goal, others_pos, others_valid,
+                                robot_pos, boxes, dt, cfg):
+    """Step the target via Helbing social force (sees other humans + robot +
+    boxes as repulsion sources). Thin wrapper around ``step_one_human``."""
+    return step_one_human(pos, vel, goal, others_pos, others_valid,
+                          robot_pos, boxes, dt, cfg)
 
 
 # ----- Config -----------------------------------------------------------------
 class EnvConfig(NamedTuple):
-    arena_size: float = 10.0      # m (half-width). Total arena = 20×20.
+    arena_size: float = 18.0      # m (half-width). Matches paper sim.arena_size=18.
     n_boxes: int = 6              # number of axis-aligned inner obstacles
     box_min_size: float = 1.5
     box_max_size: float = 3.0
     max_human_num: int = 45       # match original obs_space
-    human_num: int = 10           # ACTIVE humans this episode (rest invalid)
+    human_num: int = 40           # paper sim.human_num=40
     predict_steps: int = 5
     time_step: float = 0.25
     max_steps: int = 200          # 200 * 0.25s = 50s episode (matches paper time_limit)
@@ -114,34 +122,49 @@ def _spawn_boxes(key: jax.Array, cfg: EnvConfig) -> jax.Array:
     return jnp.stack([cx - half, cy - half, cx + half, cy + half], axis=-1)
 
 
-def _spawn_agents(key: jax.Array, boxes: jax.Array, cfg: EnvConfig):
-    """Spawn robot + target + other humans in free space (not inside boxes).
+def _sample_free(key: jax.Array, boxes: jax.Array, cfg: EnvConfig,
+                 n_attempts: int = 16, margin: float = 0.4) -> jax.Array:
+    """JAX-friendly rejection sampler: pick the point (out of n_attempts uniform
+    samples) farthest from any obstacle. Used for robot/target/human spawns to
+    avoid the original env's ~14% "spawn-inside-obstacle" episodes.
+    """
+    keys = jax.random.split(key, n_attempts)
+    def _one(k):
+        return jax.random.uniform(k, (2,),
+                                  minval=-cfg.arena_size + margin,
+                                  maxval=cfg.arena_size - margin)
+    pts = jax.vmap(_one)(keys)                                    # (n_attempts, 2)
+    nx = jnp.clip(pts[:, 0:1], boxes[None, :, 0], boxes[None, :, 2])  # (n_attempts, n_boxes)
+    ny = jnp.clip(pts[:, 1:2], boxes[None, :, 1], boxes[None, :, 3])
+    nearest = jnp.stack([nx, ny], axis=-1)                        # (n_attempts, n_boxes, 2)
+    d_per_box = jnp.linalg.norm(pts[:, None, :] - nearest, axis=-1)
+    d_min = jnp.min(d_per_box, axis=-1)                           # (n_attempts,)
+    return pts[jnp.argmax(d_min)]
 
-    Naive uniform sampling — collisions with boxes are tolerated and the social
-    force will push agents out. Robust enough for training.
+
+def _spawn_agents(key: jax.Array, boxes: jax.Array, cfg: EnvConfig):
+    """Spawn robot + target + other humans in free space (H3 fix).
+
+    Each agent uses ``_sample_free`` to land away from box obstacles. Target
+    additionally spawns within 2-3m of robot for a sensible initial follow
+    geometry.
 
     Returns (robot_xy, target_xy, target_goal, human_xys, human_goals).
     """
-    k_r, k_ta, k_td, k_tg, k_hxy, k_hg = jax.random.split(key, 6)
-    robot_xy = jax.random.uniform(k_r, (2,),
-                                  minval=-cfg.arena_size * 0.5,
-                                  maxval=cfg.arena_size * 0.5)
-    # Target spawns within 2-3m of robot (sensible initial follow scenario)
-    angle = jax.random.uniform(k_ta, (), minval=0, maxval=2 * jnp.pi)
-    dist = jax.random.uniform(k_td, (), minval=2.0, maxval=3.0)
-    target_xy = robot_xy + jnp.array([jnp.cos(angle), jnp.sin(angle)]) * dist
-    # Target goal: far point in arena
-    target_goal = jax.random.uniform(k_tg, (2,),
-                                     minval=-cfg.arena_size * 0.8,
-                                     maxval=cfg.arena_size * 0.8)
-    # Other humans uniformly scattered
     M = cfg.max_human_num
-    h_xys = jax.random.uniform(k_hxy, (M, 2),
-                               minval=-cfg.arena_size + 0.5,
-                               maxval=cfg.arena_size - 0.5)
-    h_goals = jax.random.uniform(k_hg, (M, 2),
-                                 minval=-cfg.arena_size + 0.5,
-                                 maxval=cfg.arena_size - 0.5)
+    # Split keys: 1 robot, 1 target-direction, 1 target-goal, M human-xy, M human-goal
+    keys = jax.random.split(key, 3 + 2 * M)
+    robot_xy = _sample_free(keys[0], boxes, cfg)
+    # Target spawns within 2-3m of robot in a random direction
+    k_dir = keys[1]
+    angle = jax.random.uniform(k_dir, (), minval=0, maxval=2 * jnp.pi)
+    dist = jax.random.uniform(k_dir, (), minval=2.0, maxval=3.0)
+    target_xy = robot_xy + jnp.array([jnp.cos(angle), jnp.sin(angle)]) * dist
+    target_goal = _sample_free(keys[2], boxes, cfg)
+
+    # Per-human free-space spawn + free-space goal — vmap over M
+    h_xys = jax.vmap(lambda k: _sample_free(k, boxes, cfg))(keys[3:3 + M])
+    h_goals = jax.vmap(lambda k: _sample_free(k, boxes, cfg))(keys[3 + M:3 + 2 * M])
     return robot_xy, target_xy, target_goal, h_xys, h_goals
 
 
@@ -214,18 +237,29 @@ def build_obs(state: EnvState, cfg: EnvConfig,
     # temporal_edges: (1, 2) — robot vel
     temporal_edges = state.robot_vel[None, :]
 
-    # spatial_edges: (max_human_num, 2*(predict_steps+1))
+    # spatial_edges: (max_human_num, 2*(predict_steps+1)) — sorted by distance (O1)
     # constant-velocity extrapolation: pos + vel * k * dt
     ks = jnp.arange(cfg.predict_steps + 1) * cfg.time_step
-    # (M, K, 2) relative human positions over time
     rel = (state.human_xy[:, None, :] +
            state.human_vel[:, None, :] * ks[None, :, None] -
-           state.robot_xy[None, None, :])
-    spatial_edges = rel.reshape(cfg.max_human_num, -1).astype(jnp.float32)
+           state.robot_xy[None, None, :])  # (M, K, 2)
+    spatial_edges_unsorted = rel.reshape(cfg.max_human_num, -1).astype(jnp.float32)
 
-    # detected_human_num: count of valid + within sensor_range
-    in_range = jnp.linalg.norm(state.human_xy - state.robot_xy, axis=-1) < lidar_cfg.max_range
-    detected = jnp.sum(state.human_valid & in_range).astype(jnp.float32)[None]
+    # Distance for sort + in-range gate. Invalid humans get +inf so they sink
+    # to the end. Out-of-range humans also pushed to end and replaced with
+    # sentinel 15.0 (matches paper crowd_sim_following.py:667-668).
+    cur_dist = jnp.linalg.norm(state.human_xy - state.robot_xy, axis=-1)
+    in_range = cur_dist < lidar_cfg.max_range
+    visible = state.human_valid & in_range
+    sort_key = jnp.where(visible, cur_dist, jnp.inf)
+    order = jnp.argsort(sort_key)
+    spatial_edges_sorted = spatial_edges_unsorted[order]
+    # Replace invisible (now at the end) with sentinel 15
+    visible_sorted = visible[order]
+    spatial_edges = jnp.where(visible_sorted[:, None], spatial_edges_sorted, 15.0)
+
+    # detected_human_num: count of valid + within sensor_range (floor at 1, L1 fix)
+    detected = jnp.maximum(jnp.sum(visible).astype(jnp.float32), 1.0)[None]
 
     # target_human_traj: (12,) predicted target xy
     target_rel = (state.target_xy[None, :] +
@@ -267,27 +301,34 @@ def env_step(key: jax.Array, state: EnvState, action: jax.Array, cfg: EnvConfig,
     """
     dt = cfg.time_step
 
-    # 1) Robot: clip action to v_pref and integrate
-    v_cmd = jnp.clip(action, -cfg.robot_v_pref, cfg.robot_v_pref)
-    new_robot_vel = v_cmd
+    # 1) Robot: L2-norm clip to v_pref (C5 — matches paper srnn.py:28-33,
+    #    NOT per-axis clip which would allow ||v||=v_pref*sqrt(2) on diagonals)
+    speed = jnp.linalg.norm(action) + 1e-6
+    scale = jnp.minimum(1.0, cfg.robot_v_pref / speed)
+    new_robot_vel = action * scale
     new_robot_xy = state.robot_xy + new_robot_vel * dt
     new_robot_yaw = jnp.arctan2(new_robot_vel[1], new_robot_vel[0])
 
-    # 2) Target human: walk toward target_goal at constant target_speed
-    diff = state.target_goal - state.target_xy
-    dist_to_goal = jnp.linalg.norm(diff) + 1e-6
-    target_vel_unit = diff / dist_to_goal
-    new_target_vel = target_vel_unit * cfg.target_speed
-    new_target_xy = state.target_xy + new_target_vel * dt
-    # When target reaches goal, pick a new random one
+    # 2) Target human: now stepped via social force like other humans (H2 fix).
+    #    Previously was a constant-velocity drone that ignored obstacles/robot.
+    k1, k_humans = jax.random.split(key, 2)
+    # Re-goal if reached: matches paper end_goal_changing=True behavior
+    diff_tg = state.target_goal - state.target_xy
+    dist_to_goal = jnp.linalg.norm(diff_tg) + 1e-6
     reached = dist_to_goal < 0.5
-    k1, k2 = jax.random.split(key)
-    new_goal_proposal = jax.random.uniform(k1, (2,),
-                                           minval=-cfg.arena_size * 0.8,
-                                           maxval=cfg.arena_size * 0.8)
+    new_goal_proposal = _sample_free(k1, state.boxes, cfg)
     new_target_goal = jnp.where(reached, new_goal_proposal, state.target_goal)
 
-    # 3) Other humans: social force
+    # Run target through social force: it sees the robot + ALL other humans
+    # as repulsion sources, plus boxes. Output velocity is capped at desired_speed.
+    new_target_xy, new_target_vel = _step_one_with_social_force(
+        state.target_xy, state.target_vel, new_target_goal,
+        state.human_xy, state.human_valid, new_robot_xy,
+        state.boxes, dt, human_cfg,
+    )
+
+    # 3) Other humans: social force (target_xy is repulsion source for them too,
+    #    so they don't run through the target)
     new_h_xy, new_h_vel = step_all_humans(
         state.human_xy, state.human_vel, state.human_goal, state.human_valid,
         new_robot_xy, state.boxes, dt, human_cfg,
@@ -310,7 +351,7 @@ def env_step(key: jax.Array, state: EnvState, action: jax.Array, cfg: EnvConfig,
         human_vel=new_h_vel,
         ogm_history=new_ogm_history,
         step_count=state.step_count + 1,
-        key=k2,
+        key=k_humans,
     )
 
     # 5) Reward + done — MATCHES paper crowd_sim_following.calc_reward()

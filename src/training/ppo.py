@@ -38,7 +38,7 @@ class PPOConfig(NamedTuple):
     lr: float = 4e-5
     gamma: float = 0.99
     gae_lambda: float = 0.95
-    max_grad_norm: float = 0.5
+    max_grad_norm: float = 0.1   # paper arguments.py:108-112
 
 
 class Rollout(NamedTuple):
@@ -112,8 +112,10 @@ def ppo_loss(params, apply_fn, obs, action, old_log_prob, advantage, ret,
     value_loss2 = (value_clipped - ret) ** 2
     value_loss = 0.5 * jnp.mean(jnp.maximum(value_loss1, value_loss2))
 
-    # Entropy bonus (diagonal Gaussian)
-    entropy = jnp.mean(0.5 * (1 + jnp.log(2 * jnp.pi)) + log_std).sum()
+    # Entropy of diagonal Gaussian: H = 0.5*A*(1 + log(2π)) + Σᵢ log(σᵢ)
+    # (independent of batch since log_std is a shared parameter)
+    A = action.shape[-1]
+    entropy = 0.5 * A * (1.0 + jnp.log(2.0 * jnp.pi)) + jnp.sum(log_std)
 
     total = policy_loss + cfg.value_loss_coef * value_loss - cfg.entropy_coef * entropy
     return total, (policy_loss, value_loss, entropy)
@@ -187,8 +189,12 @@ def update_minibatch(opt_state, params, apply_fn, optimizer, batch, cfg):
     return params, opt_state, loss, aux
 
 
-def ppo_update(params, opt_state, apply_fn, optimizer, rollout, last_value, cfg):
-    """One PPO update phase: compute GAE then ppo_epoch × num_mini_batch grad steps."""
+def ppo_update(params, opt_state, apply_fn, optimizer, rollout, last_value, cfg, key):
+    """One PPO update phase: compute GAE then ppo_epoch × num_mini_batch grad steps.
+
+    ``key`` seeds the per-epoch minibatch shuffle. Caller MUST advance the key
+    each PPO update (was previously hard-coded ``PRNGKey(0)``).
+    """
     advantages, returns = compute_gae(
         rollout.rewards, rollout.values, rollout.dones, last_value, cfg
     )
@@ -236,9 +242,8 @@ def ppo_update(params, opt_state, apply_fn, optimizer, rollout, last_value, cfg)
         )
         return (params, opt_state, key), out
 
-    init_key = jax.random.PRNGKey(0)
     (params, opt_state, _), epoch_out = jax.lax.scan(
-        epoch_body, (params, opt_state, init_key), None, length=cfg.ppo_epoch
+        epoch_body, (params, opt_state, key), None, length=cfg.ppo_epoch
     )
     losses, aux = epoch_out
     return params, opt_state, losses.mean(), aux
@@ -268,9 +273,10 @@ def make_train(env_reset, env_step, apply_fn, cfg: PPOConfig):
         # 2) Bootstrap value from final obs for GAE
         value_last, _, _ = apply_fn(params, obs)
         last_value = value_last.squeeze(-1)
-        # 3) PPO update
+        # 3) PPO update — advance key so each update gets fresh minibatch shuffles
+        key, k_upd = jax.random.split(key)
         params, opt_state, mean_loss, _aux = ppo_update(
-            params, opt_state, apply_fn, optimizer, rollout, last_value, cfg
+            params, opt_state, apply_fn, optimizer, rollout, last_value, cfg, k_upd
         )
         mean_reward = rollout.rewards.mean()
         return (params, opt_state, state, obs, key), (mean_reward, mean_loss)

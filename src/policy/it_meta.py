@@ -29,6 +29,26 @@ import jax.numpy as jnp
 import flax.linen as nn
 
 
+# PPO best-practice initializers (matches PyTorch original's
+# `orthogonal_(sqrt(2))` + zero bias used throughout actor/critic).
+_ortho2 = nn.initializers.orthogonal(jnp.sqrt(2.0))
+_ortho1 = nn.initializers.orthogonal(1.0)
+_ortho_small = nn.initializers.orthogonal(0.01)   # action-mean: small init for stable initial policy
+_zeros = nn.initializers.zeros
+
+
+def _sinusoidal_pe(seq_len: int, d_model: int) -> jax.Array:
+    """Standard sinusoidal positional encoding matching PyTorch original
+    (`interaction_transformer.py:PositionalEncoding`)."""
+    pos = jnp.arange(seq_len)[:, None].astype(jnp.float32)
+    i = jnp.arange(0, d_model, 2).astype(jnp.float32)
+    div = jnp.exp(i * (-jnp.log(10000.0) / d_model))
+    pe = jnp.zeros((seq_len, d_model))
+    pe = pe.at[:, 0::2].set(jnp.sin(pos * div))
+    pe = pe.at[:, 1::2].set(jnp.cos(pos * div))
+    return pe[None]
+
+
 # ----- CNN -----------------------------------------------------------------
 class OGMCNN(nn.Module):
     """3-stack OGM → 256-dim feature vector.
@@ -129,71 +149,69 @@ class ITMetaPolicy(nn.Module):
     def __call__(self, obs):
         B = obs['robot_node'].shape[0]
 
-        # 1) Embed each modality to feature_dim=256
+        # 1) Embed each modality to feature_dim=256 (orthogonal(sqrt(2)) init throughout)
         # robot_states = concat(following_preference[1], temporal_edges[2], robot_node[7]) = 10
         robot_states = jnp.concatenate([
             obs['following_preference'].reshape(B, 1, 1),
             obs['temporal_edges'].reshape(B, 1, 2),
             obs['robot_node'].reshape(B, 1, 7),
         ], axis=-1)  # (B, 1, 10)
-        robot_embed = nn.Dense(128)(robot_states)
+        robot_embed = nn.Dense(128, kernel_init=_ortho2, bias_init=_zeros)(robot_states)
         robot_embed = nn.relu(robot_embed)
-        robot_embed = nn.Dense(self.feature_dim)(robot_embed)  # (B, 1, 256)
+        robot_embed = nn.Dense(self.feature_dim, kernel_init=_ortho2, bias_init=_zeros)(robot_embed)
 
         # human_embedding 12 → 128 → 256
-        human_embed = nn.Dense(128)(obs['spatial_edges'])  # (B, M, 12) → (B, M, 128)
+        human_embed = nn.Dense(128, kernel_init=_ortho2, bias_init=_zeros)(obs['spatial_edges'])
         human_embed = nn.relu(human_embed)
-        human_embed = nn.Dense(self.feature_dim)(human_embed)  # (B, M, 256)
+        human_embed = nn.Dense(self.feature_dim, kernel_init=_ortho2, bias_init=_zeros)(human_embed)
 
         # target_embedding 12 → 128 → 256
-        target_embed = nn.Dense(128)(obs['target_human_traj'])  # (B, 12) → (B, 128)
+        target_embed = nn.Dense(128, kernel_init=_ortho2, bias_init=_zeros)(obs['target_human_traj'])
         target_embed = nn.relu(target_embed)
-        target_embed = nn.Dense(self.feature_dim)(target_embed)  # (B, 256)
+        target_embed = nn.Dense(self.feature_dim, kernel_init=_ortho2, bias_init=_zeros)(target_embed)
         target_embed = target_embed[:, None, :]  # (B, 1, 256)
 
         # obstacle: CNN(local_ogm) then linear 256 → 256
         ogm_feat = OGMCNN(output_dim=self.feature_dim)(obs['local_ogm'])  # (B, 256)
-        obstacle_embed = nn.Dense(self.feature_dim)(ogm_feat)[:, None, :]  # (B, 1, 256)
+        obstacle_embed = nn.Dense(self.feature_dim, kernel_init=_ortho2, bias_init=_zeros)(ogm_feat)[:, None, :]
 
         # 2) Concat to sequence (B, 3+M, 256): robot, target, obstacle, humans
         sequence = jnp.concatenate(
             [robot_embed, target_embed, obstacle_embed, human_embed], axis=1
         )
 
+        # 2b) Add sinusoidal positional encoding (paper interaction_transformer.py:61-82)
+        sequence = sequence + _sinusoidal_pe(sequence.shape[1], self.feature_dim)
+
         # 3) Attention mask: robot/target/obstacle always valid, humans by detected count
         det = obs['detected_human_num'].astype(jnp.int32).reshape(B)
-        idx = jnp.arange(self.max_human_num)[None, :]  # (1, M)
-        human_mask = idx < det[:, None]  # (B, M) — True for valid
+        idx = jnp.arange(self.max_human_num)[None, :]
+        human_mask = idx < det[:, None]
         prefix = jnp.ones((B, 3), dtype=bool)
-        attn_mask = jnp.concatenate([prefix, human_mask], axis=1)  # (B, 3+M)
-
-        # Flax SelfAttention mask: (B, num_heads, q_len, kv_len)
-        # We want positions in kv_len that are valid; broadcast to all queries.
-        kv_mask = attn_mask[:, None, None, :]  # (B, 1, 1, 3+M)
+        attn_mask = jnp.concatenate([prefix, human_mask], axis=1)
+        kv_mask = attn_mask[:, None, None, :]
 
         # 4) Transformer
         seq_out = TransformerEncoder(
             feature_dim=self.feature_dim, nhead=8, num_layers=4, dim_ff=1024
-        )(sequence, mask=kv_mask)  # (B, 3+M, 256)
+        )(sequence, mask=kv_mask)
 
         # 5) Robot token (index 0) → output projection
-        robot_out = seq_out[:, 0, :]  # (B, 256)
-        h = nn.Dense(self.feature_dim // 2)(robot_out)  # 256 → 128
+        robot_out = seq_out[:, 0, :]
+        h = nn.Dense(self.feature_dim // 2, kernel_init=_ortho2, bias_init=_zeros)(robot_out)
         h = nn.relu(h)
-        h = nn.Dense(self.output_size)(h)  # 128 → 64
+        h = nn.Dense(self.output_size, kernel_init=_ortho2, bias_init=_zeros)(h)
 
-        # 6) Actor + critic heads (separate, each 64→64→64 with tanh)
-        actor_h = nn.tanh(nn.Dense(self.output_size)(h))
-        actor_h = nn.tanh(nn.Dense(self.output_size)(actor_h))
-        critic_h = nn.tanh(nn.Dense(self.output_size)(h))
-        critic_h = nn.tanh(nn.Dense(self.output_size)(critic_h))
+        # 6) Actor + critic heads (each 64→64→64 with tanh, orthogonal init)
+        actor_h = nn.tanh(nn.Dense(self.output_size, kernel_init=_ortho2, bias_init=_zeros)(h))
+        actor_h = nn.tanh(nn.Dense(self.output_size, kernel_init=_ortho2, bias_init=_zeros)(actor_h))
+        critic_h = nn.tanh(nn.Dense(self.output_size, kernel_init=_ortho2, bias_init=_zeros)(h))
+        critic_h = nn.tanh(nn.Dense(self.output_size, kernel_init=_ortho2, bias_init=_zeros)(critic_h))
 
-        # 7) Value + action mean + learnable log_std (DiagGaussian)
-        value = nn.Dense(1)(critic_h)  # (B, 1)
-        action_mean = nn.Dense(self.action_dim)(actor_h)  # (B, action_dim)
-        action_log_std = self.param('action_log_std',
-                                    nn.initializers.zeros,
-                                    (self.action_dim,))
+        # 7) Value (gain=1.0) + action mean (gain=0.01, PPO small-final-layer trick) + log_std
+        value = nn.Dense(1, kernel_init=_ortho1, bias_init=_zeros)(critic_h)
+        action_mean = nn.Dense(self.action_dim, kernel_init=_ortho_small, bias_init=_zeros)(actor_h)
+        action_log_std = self.param('action_log_std', _zeros, (self.action_dim,))
         return value, action_mean, action_log_std
 
 
